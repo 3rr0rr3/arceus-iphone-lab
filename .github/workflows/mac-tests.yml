@@ -1,0 +1,88 @@
+name: GitHub Mac tests
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mac-tests-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+  GAME: 010015100B514000
+defaults:
+  run:
+    shell: bash
+jobs:
+  host:
+    name: Mac host and CPU texture tests
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python arceus.py setup
+      - name: Test wrapper
+        run: python -m unittest discover -s tests -v
+      - name: Host unit tests
+        run: |
+          mkdir -p logs
+          set -o pipefail
+          make -C vendor/nxnative/dm/host/tests GAME="$GAME" -j3 run 2>&1 | tee logs/host.log
+      - name: CPU texture tests
+        run: |
+          set -o pipefail
+          make -C vendor/nxnative/dm/gfx/tex/tests t_tex 2>&1 | tee logs/texture-build.log
+          vendor/nxnative/dm/gfx/tex/tests/t_tex 2>&1 | tee logs/texture.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mac-host-test-logs
+          path: logs
+          retention-days: 7
+  ios:
+    name: iPhone source compile and synthetic app link
+    runs-on: xcode-27
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python arceus.py setup
+      - name: Check Apple toolchain
+        run: |
+          mkdir -p logs
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcrun metal --version
+          python vendor/nxnative/dm/gfx/tools/own_compilers.py --check-metal
+      - name: Compile iOS runtime sources
+        run: |
+          set -o pipefail
+          python vendor/nxnative/dm/ios/tools/compile_check.py 2>&1 | tee logs/ios-compile.log
+      - name: Install project generator
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+        run: command -v xcodegen || brew install xcodegen
+      - name: Link unsigned synthetic app (no game content)
+        run: |
+          set -o pipefail
+          python vendor/nxnative/dm/ios/tools/build_smoke.py --output "$RUNNER_TEMP/ios-smoke" 2>&1 | tee logs/ios-link.log
+      - name: Report scope
+        if: always()
+        run: |
+          echo "Tests use a supported upstream profile and synthetic modules. They do not test Arceus, GPU rendering, signing, installation or gameplay." >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iphone-compile-test-logs
+          path: logs
+          retention-days: 7
