@@ -1,0 +1,39 @@
+name: Wrapper and upstream contract
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test launcher validation and argument handling
+        run: python -m unittest discover -s tests -v
+      - name: Fetch exact upstream source
+        run: python arceus.py setup
+      - name: Verify expected upstream options and profile status
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          root = Path("vendor/nxnative")
+          source = (root / "scripts/build_ipa_from_nsp.py").read_text()
+          ast.parse(source)
+          for flag in ("--survey-only", "--platform", "--prepare-xcode", "--app-name"):
+              assert flag in source, f"Upstream no longer exposes {flag}"
+          profile = root / "dm/games/01001F5010DFA000/game.tsv"
+          status = "present (still needs device testing)" if profile.exists() else "absent; experimental provisional profile required"
+          with open("compatibility.txt", "w") as report:
+              report.write("NxNative: " + Path("nxnative.lock").read_text().strip() + "\nArceus profile: " + status + "\nNo game files were used. No boot or iPhone compatibility test performed.\n")
+          print(Path("compatibility.txt").read_text())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-compatibility-report
+          path: compatibility.txt

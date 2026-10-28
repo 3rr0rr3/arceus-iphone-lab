@@ -1,0 +1,13 @@
+__pycache__/
+.venv/
+vendor/
+private/
+*_build/
+*_survey/
+*.nsp
+*.NSP
+*.xci
+*.nsz
+*.keys
+*.ipa
+*.log
